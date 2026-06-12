@@ -1,0 +1,27 @@
+{
+  "payments": {
+    "x402": {
+      "enabled": true,
+      "requireMandate": true,
+      "maxPerRequestUSDC": 0.25,
+      "maxDailyUSDC": 2
+    }
+  },
+  "mcpProxy": {
+    "defaultAction": "approval_required",
+    "upstreams": [
+      {
+        "name": "files",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "."
+        ]
+      }
+    ]
+  },
+  "attestation": {
+    "schemaUid": ""
+  }
+}
