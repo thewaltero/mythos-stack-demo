@@ -1,0 +1,39 @@
+name: stack
+
+# Box 1: the scheduled skeleton. Runs nightly and on demand. At this stage it
+# installs the stack, health-checks it, and proves the policy gate loads —
+# the agent task lands in a later box. Every run uploads .mythos as evidence.
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install mythos-sentinel
+        run: npm install -g github:thewaltero/mythos-sentinel
+      - name: Health check
+        run: mythos-sentinel doctor
+      - name: Policy gate loads and enforces
+        run: |
+          mythos-sentinel check-payment --domain unknown.example --amount 0.50 --json || true
+          mythos-sentinel spend --json
+      - name: Self-scan this repo
+        run: mythos-sentinel scan . --fail-on critical
+      - name: Upload session evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mythos-session-${{ github.run_number }}
+          path: .mythos/
+          if-no-files-found: ignore
