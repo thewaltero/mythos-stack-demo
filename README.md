@@ -1,6 +1,6 @@
 # mythos-stack-demo
 
-> **Status: early — repo just created, pipeline being wired in public. Nothing here is runnable yet. Watch the commits.**
+> **Status: skeleton runs nightly — see the [Actions tab](../../actions). The pipeline installs the stack, health-checks the gate, and uploads session evidence. Agent task being wired next.**
 
 An autonomous agent that runs on a schedule, spends within a signed mandate,
 writes code that is hash-verified, and seals every session as an attestation
@@ -17,10 +17,18 @@ on Base. This repo is the working demonstration of that pipeline.
 The morning-after artifact: one receipt trail showing what ran, what changed,
 what it spent, and the authorization that allowed it.
 
+## How it's wired
+
+`.mcp.json` exposes exactly one MCP server to the agent: the Sentinel proxy.
+Everything else (filesystem tools, payment servers) lives behind it as
+upstreams in `mythos.policy.json` — one guarded door, no side entrances.
+The policy ships strict: unknown tools need approval, payments need a signed
+mandate, daily cap enforced from Sentinel's own ledger.
+
 ## Roadmap to working
 
-- [ ] scheduled workflow skeleton
-- [ ] sentinel proxy wired into the agent's MCP config
+- [x] scheduled workflow skeleton
+- [x] sentinel proxy wired into the agent's MCP config
 - [ ] signed mandate committed
 - [ ] router receipts in the loop
 - [ ] first attested session
