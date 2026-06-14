@@ -1,6 +1,6 @@
 # mythos-stack-demo
 
-> **Status: skeleton runs nightly — see the [Actions tab](../../actions). The pipeline installs the stack, health-checks the gate, and uploads session evidence. Agent task being wired next.**
+> **Status: nightly run is green — see the [Actions tab](../../actions). Each run verifies the signed mandate, produces and verifies a SHA-256 work receipt, and seals the session into an attestation bundle. Remaining: on-chain broadcast of the attestation (Base Sepolia) and swapping the model-free stand-in for the live aeon agent.**
 
 An autonomous agent that runs on a schedule, spends within a signed mandate,
 writes code that is hash-verified, and seals every session as an attestation
@@ -29,8 +29,8 @@ mandate, daily cap enforced from Sentinel's own ledger.
 
 - [x] scheduled workflow skeleton
 - [x] sentinel proxy wired into the agent's MCP config
-- [ ] signed mandate committed
-- [ ] router receipts in the loop
+- [x] signed mandate committed
+- [x] router receipts in the loop
 - [ ] first attested session
 - [ ] aeon as the agent runner
 - [ ] first attested unattended aeon run

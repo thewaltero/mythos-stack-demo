@@ -1,0 +1,12 @@
+# Per-run mythos artifacts are produced fresh by CI and uploaded as build
+# artifacts — they should not be committed. The signed mandate IS committed
+# (it is the authorization box 3 verifies), so it is explicitly NOT ignored.
+.mythos/receipts/
+.mythos/attestations/
+.mythos/runs/
+demo-artifacts/
+
+# keep the signed mandate
+!.mythos/mandates/
+
+node_modules/

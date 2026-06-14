@@ -1,0 +1,17 @@
+{
+  "version": "1",
+  "mandate": {
+    "mandateId": "2cdfdff8-813c-4bfa-84fe-0554738e6cce",
+    "agent": "mythos-stack-demo",
+    "scopeDomains": "api.example.com",
+    "scopeCategories": "*",
+    "maxPerRequestMicroUSDC": "250000",
+    "capMicroUSDC": "2000000",
+    "notBefore": "1781405688",
+    "expiry": "1789181688",
+    "chainId": "8453"
+  },
+  "signature": "0xba6e9e936205607e90d80f4bc26c86301518dbaae27e0db013510bde42b630df460b83b77c0a22e335f80284e2b0b64ee079b47499d20846277742bf5cfeb65e1c",
+  "signer": "0xf4e6122b10870d9C8FceaD8554e34baa5Da66862",
+  "signedAt": "2026-06-14T02:54:48.965Z"
+}
