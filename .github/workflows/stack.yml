@@ -1,8 +1,23 @@
 name: stack
 
-# Box 1: the scheduled skeleton. Runs nightly and on demand. At this stage it
-# installs the stack, health-checks it, and proves the policy gate loads —
-# the agent task lands in a later box. Every run uploads .mythos as evidence.
+# mythos-stack-demo pipeline.
+# Boxes done in this workflow:
+#   1. scheduled skeleton            5. session attestation sealed + verified (keyless)
+#   2. sentinel gate                 (signing + on-chain broadcast: parked Sepolia step)
+#   3. signed mandate verified
+#   4. router receipts produced + verified (fail-closed)
+# The live agent (aeon) replaces the model-free stand-in at boxes 6-7.
+#
+# Security posture:
+#   - No secrets are used in this workflow. Mandate verification and the
+#     attestation bundle are both signature/​hash operations that need no key,
+#     so there is nothing here to leak in logs. Signing and on-chain broadcast
+#     (which need a key) are deliberately deferred to the parked Sepolia run.
+#   - Third-party actions are pinned to full commit SHAs, not mutable tags
+#     (CVE-2025-30066 / tj-actions). Update SHAs deliberately.
+#   - checkout runs with persist-credentials: false so no token is written to
+#     the runner's git config.
+
 on:
   schedule:
     - cron: '17 3 * * *'
@@ -14,26 +29,129 @@ permissions:
 jobs:
   stack:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-      - name: Install mythos-sentinel
-        run: npm install -g github:thewaltero/mythos-sentinel
-      - name: Health check
-        run: mythos-sentinel doctor
+
+      # mythos-router is installed from npm (the published tarball includes the
+      # compiled dist/). mythos-sentinel is installed from GitHub because npm
+      # only has the old 0.1.x line; GitHub tracks the current 0.3.x, and
+      # sentinel is plain JS so a git install runs as-is.
+      # NOTE: do NOT switch router to a github: install — router's dist/ is
+      # gitignored and it has no `prepare` hook, so a git install would have no
+      # working CLI. npm install (or a `prepare` script in router) is required.
+      - name: Install mythos tools
+        run: |
+          set -euo pipefail
+          npm install -g mythos-router
+          npm install -g github:thewaltero/mythos-sentinel
+
+      - name: Health check (both tools load)
+        run: |
+          set -euo pipefail
+          mythos-sentinel doctor
+          mythos receipts list --json > /dev/null
+          echo "sentinel + router CLIs OK"
+
+      # Box 3: prove the committed mandate is genuinely signed and that a
+      # representative in-scope payment is authorized by it. Verification is
+      # signature-only (no key). `mandate verify` reports status in JSON, so we
+      # assert on it explicitly and fail the run if the mandate is missing,
+      # forged, expired, or would not actually authorize spend.
+      - name: Verify signed mandate
+        run: |
+          set -euo pipefail
+          MFILE="$(ls .mythos/mandates/*.json 2>/dev/null | head -1 || true)"
+          if [ -z "$MFILE" ]; then
+            echo "::error::No committed mandate found in .mythos/mandates/"
+            exit 1
+          fi
+          echo "Verifying mandate: $MFILE"
+          mythos-sentinel mandate verify --file "$MFILE" --domain api.example.com --amount 0.20 --json | tee mandate-check.json
+          node -e "const r=require('./mandate-check.json'); if(!r.signature||!r.signature.ok){console.error('mandate signature INVALID');process.exit(1)} if(r.enforcement&&r.enforcement.decision!=='allow'){console.error('mandate would block an in-scope spend: '+((r.enforcement.reasons)||[]).join('; '));process.exit(1)} console.log('mandate OK: signed by '+r.signature.signer+', in-scope spend allowed')"
+
       - name: Policy gate loads and enforces
         run: |
+          set -euo pipefail
           mythos-sentinel check-payment --domain unknown.example --amount 0.50 --json || true
           mythos-sentinel spend --json
+
+      # Box 4: router receipts in the loop. A model-free Strict Write Discipline
+      # action (no LLM) writes a file and records a SHA-256 receipt under
+      # .mythos/receipts/. We then verify EVERY receipt and fail closed.
+      # `receipts verify` reports status in JSON but does not set a failing exit
+      # code and only checks the latest receipt, so we iterate and assert
+      # ourselves. When aeon becomes the runner (box 6), its real file changes
+      # flow through this identical receipt path.
+      - name: Router receipts in the loop
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/agent-action.txt" << 'ACTION'
+          [FILE_ACTION: demo-artifacts/agent-output.txt]
+          OPERATION: CREATE
+          INTENT: MUTATE
+          DESCRIPTION: Model-free stand-in write to exercise the receipt path
+          CONTENT:
+          mythos-stack-demo :: receipts-in-the-loop
+          Replaced by a real aeon-driven change at box 6.
+          [/FILE_ACTION]
+          ACTION
+          mythos swd apply --file "$RUNNER_TEMP/agent-action.txt" \
+            --request "demo loop: receipts-in-the-loop" \
+            --agent "demo-standin" --json | tee swd-apply.json
+          node -e "const r=require('./swd-apply.json'); if(!r.ok){console.error('SWD apply failed: '+JSON.stringify(r.result&&r.result.errors));process.exit(1)} console.log('SWD apply OK, receipt '+(r.receipt&&r.receipt.id))"
+          echo "Verifying every receipt (fail-closed)..."
+          fail=0
+          for f in .mythos/receipts/*.json; do
+            id="$(basename "$f" .json)"
+            mythos receipts verify "$id" --json > "$RUNNER_TEMP/rcpt.json" || true
+            node -e "const r=require('$RUNNER_TEMP/rcpt.json'); const ok=r.ok===true && r.integrityOk===true; console.log((ok?'  PASS ':'  FAIL ')+'$id'+(ok?'':' files='+JSON.stringify((r.files||[]).map(x=>x.status))+' integrityOk='+r.integrityOk)); process.exit(ok?0:1)" || fail=1
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::Receipt verification found drift or integrity failure"
+            exit 1
+          fi
+
+      # Box 5: seal the session as an attestation. `attest` (keyless) collects
+      # the work receipts and spend ledger into a content-addressed bundle
+      # (merkle root + bundle hash) under .mythos/attestations/, then we verify
+      # the bundle. `attest verify` fails closed (non-zero on tamper), and we
+      # also assert on its JSON. Offline signing (--sign) and on-chain broadcast
+      # (--broadcast --network base-sepolia, which need a key and gas) are the
+      # parked Sepolia step, not run here.
+      - name: Seal and verify session attestation
+        run: |
+          set -euo pipefail
+          mythos-sentinel attest --json | tee attest-bundle.json > /dev/null
+          BUNDLE="$(ls .mythos/attestations/*.json 2>/dev/null | sort | tail -1 || true)"
+          if [ -z "$BUNDLE" ]; then
+            echo "::error::No attestation bundle was written"
+            exit 1
+          fi
+          echo "Bundle: $BUNDLE"
+          mythos-sentinel attest verify --file "$BUNDLE" --json | tee attest-verify.json
+          node -e "const r=require('./attest-verify.json'); if(!r.integrity||!r.integrity.ok){console.error('attestation integrity FAILED: '+((r.integrity&&r.integrity.reasons)||[]).join('; '));process.exit(1)} console.log('session attestation sealed + verified (unsigned)')"
+
       - name: Self-scan this repo
         run: mythos-sentinel scan . --fail-on critical
+
       - name: Upload session evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: mythos-session-${{ github.run_number }}
-          path: .mythos/
+          path: |
+            .mythos/
+            mandate-check.json
+            swd-apply.json
+            attest-bundle.json
+            attest-verify.json
           if-no-files-found: ignore
